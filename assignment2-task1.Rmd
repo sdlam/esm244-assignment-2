@@ -1,0 +1,186 @@
+---
+title: "Assignment 2 Task 1"
+author: "Sarah Lam"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(here)
+library(cowplot)
+library(patchwork)
+library(caret)
+library(ggbeeswarm)
+library(broom)
+library(jtools)
+library(AICcmodavg)
+library(kableExtra)
+```
+
+### Overview: An overview section describing the data, the question(s) to be addressed in your analysis, and a citation of the dataset.
+
+using the Florida palmetto data (palmetto.csv), use binary logistic regression to test feasibility of using variables plant height (height), canopy length (length), canopy width (width), and number of green leaves (green_lvs) to classify whether a palmetto is species Serenoa repens or Sabal etonia. Use code folding and hide all messages & warnings in your knitted HTML. 
+
+Data source: Abrahamson, W.G. 2019. Survival, growth and biomass estimates of two dominant palmetto species of south-central Florida from 1981 - 2017, ongoing at 5-year intervals ver 1. Environmental Data Initiative. https://doi.org/10.6073/pasta/f2f96ec76fbbd4b9db431c79a770c4d5
+Get the data: palmetto.csv
+
+```{r}
+#read in the data
+palmetto <- read_csv(here("data", "palmetto.csv")) 
+```
+
+```{r}
+palmetto_clean <- palmetto %>% 
+  select(species, height, length, width, green_lvs) %>% 
+  mutate(species = case_when(
+    species == "1" ~ "s_repens",
+    species == "2" ~ "s_etonia"
+  )) %>% 
+  mutate(species = as.factor(species)) %>% 
+  drop_na()
+```
+
+### Data Visualizations
+
+A section containing 2 - 3 finalized (customized, suitable for a publication) data visualizations (with figure captions) in which you explore differences in height, canopy length, canopy width, and green leaves for the two species. If you prefer, combine the figures into a compound figure using {patchwork} or {cowplot}. 
+
+```{r}
+ggplot(data = palmetto_clean, aes(x = height, y = width)) +
+  geom_beeswarm() +
+  facet_wrap(~species)
+```
+
+```{r}
+ggplot(data = palmetto_clean, aes(x = length, y = width)) +
+  geom_point() +
+  facet_wrap(~species)
+```
+
+```{r}
+palmetto_means <- palmetto_clean %>% 
+  group_by(species) %>% 
+  summarize(mean = mean(green_lvs, na.rm = TRUE))
+
+ggplot(data = palmetto_means, aes(x = species, y = mean)) +
+  geom_col()
+```
+
+Below your data visualizations, add a sentence or two with a takeaway from the plots, e.g., based on these plots, which predictor variables are more likely to help classify species correctly?
+
+### Binary Logistic Regession 
+
+A section in which you perform binary logistic regression to determine the probability of a plant being either Serenoa repens or Sabal etonia based on several predictor variables.  Perform the analysis twice, using cross validation to compare two models:
+Log odds of plant type using plant height, canopy length, canopy width and green leaves as predictor variable.
+Log odds of plant type using plant height, canopy width and green leaves (i.e., drop canopy length for this model)
+
+```{r}
+#binary logistic regression for first model 
+f1 <- species ~ height + length + width + green_lvs
+ 
+palmetto_blr1 <- glm(formula = f1,
+                    data = palmetto_clean,
+                    family = "binomial")
+
+#binary logistic regression for second model
+f2 <- species ~ height + width + green_lvs
+
+palmetto_blr2 <- glm(formula = f2, 
+                     data = palmetto_clean, 
+                     family = "binomial")
+
+#look at the models 
+palmetto_blr1
+palmetto_blr2
+ 
+summary(palmetto_blr1)  #s_repens - '1' indexed value, on average the log odds of a palmetto being s_repens increases by x amount for every 1 unit of height, etc.
+summary(palmetto_blr2)
+```
+
+```{r}
+#cross validation
+#using `caret` (Classification And REgression Training):
+
+set.seed(123) 
+# create training set
+palmetto_tr_ctrl <- trainControl(method = "repeatedcv", number = 10, repeats = 10)
+ 
+# now train the model
+model1 <- train(f1, data = palmetto_clean, 
+               method = "glm", family = 'binomial',
+               trControl = palmetto_tr_ctrl)
+model1 
+ 
+model2 <- train(f2, data = palmetto_clean, 
+               method = "glm", family = 'binomial',
+               trControl = palmetto_tr_ctrl)
+model2
+```
+
+Use repeated cross validation (ten-fold cross validation, repeated at least ten times - you can use functions from the {caret} package to automate this, or manually perform the analysis using for-loops).  
+
+Based on the results of the cross validation, the first model appears to perform better at classification of palmetto species. The  you may wish to compare AICC values as well to support your decision. 
+
+```{r}
+#now train model on with whole data set 
+
+```
+
+Train your selected model using the entire dataset, and create a finalized table containing the binary logistic regression model results (at least coefficients, standard errors for the coefficients, and information for significance - consider using broom::tidy() to get you most of the way). 
+
+```{r}
+#tidy version
+blr1_tidy <- tidy(palmetto_blr1) %>% 
+  kable(col.names = c("Term",
+                      "Coefficient",
+                      "Standard Error",
+                      "Statistic",
+                      "P-Value"), 
+        caption = "**Table 1:** ") %>% 
+  kable_styling(full_width = FALSE)
+
+blr1_tidy
+```
+
+
+### Model Analysis 
+A section that evaluates how successfully this model would “classify” a plant as the correct species, using a 50% cutoff (e.g. if the probability is >=50% that it is species A, then it would be classified as species A). 
+Use broom::augment() to find the probabilities (instead of log-odds) for each plant in the original dataset, then add a column for which species your model would classify that plant as (using a 50% cutoff) based on the included predictor variables. 
+```{r}
+blr1_percents <- palmetto_blr1 %>% 
+  augment(type.predict = "response")
+
+model_success <- blr1_percents %>% 
+  select(species, .fitted) %>% 
+  mutate(model_guess = case_when(
+    .fitted > .50 ~ "s_repens", 
+    .fitted < .50 ~ "s_etonia"
+  )) %>% 
+  mutate(success = case_when(
+    species == model_guess ~ "correct", 
+    species != model_guess ~ "incorrect" 
+  )) 
+
+model_percent <- model_success %>% 
+  group_by(species) %>% 
+  summarize(count = n())
+
+success_summary <- model_success %>% 
+  group_by(species, success) %>% 
+  summarize(count = n()) %>% 
+  pivot_wider(names_from = success, 
+              values_from = count) %>% 
+  mutate(percent_correct = correct/(correct+incorrect) *100)
+  
+success_summary %>% 
+  kable(col.names = c("Species",
+                      "Correct",
+                      "Incorrect",
+                      "% Correctly Calssified"),
+        caption = "**Table 2:** ") %>% 
+  kable_styling(full_width = FALSE)
+```
+
+The outcome should be a finalized table showing, for each species, how many plants in the original dataset would be correctly classified and how many were incorrectly classified by the model, as well as an additional column with “% correctly classified”. Add a table caption above the table, and a 1-2 sentence conclusion paragraph after.
+

@@ -1,0 +1,77 @@
+---
+title: "Assignment 2 Task 2"
+author: "Sarah Lam"
+date: "2/3/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(here)
+library(equatiomatic)
+library(Metrics)
+library(cowplot)
+library(purrr)
+
+```
+
+### Overview
+
+Source: Lightfoot, D. and W.G. Whitford. 2020. Lizard pitfall trap data from 11 NPP study locations at the Jornada Basin LTER site, 1989-2006 ver 37. Environmental Data Initiative. https://doi.org/10.6073/pasta/4a6e258fb49c31e222ecbbcfd128967f
+
+For task 2, you will use non linear least squares to estimate parameters of a length to weight model for lizard populations in New Mexico. 
+
+```{r}
+lizard <- read_csv(here("data", "lizard.csv")) %>% 
+  select(spp, sex, SV_length, weight) %>% 
+  janitor::clean_names() %>% 
+  mutate(across(where(is.character), tolower)) %>% 
+  select(spp, sex, sv_length, weight)
+```
+
+  
+### Non Linear Least Squares Snout Length and Weight Model
+
+Fit a snout length to weight model of the following form to all lizards in your dataframe.
+Our final model:
+`r equatiomatic::extract_eq(final_mdl, wrap = TRUE)`
+
+```{r}
+#log transform the data 
+log_data <- lizard %>% 
+  mutate(log_length = log(sv_length), 
+         log_weight = log(weight))
+
+# OLS regression  to find parameters
+model_guess <- lm(log_weight ~ log_length, data = log_data)
+
+guess_coefs <- coef(model_guess) %>% 
+  exp()
+```
+
+```{r}
+weight_model <- function(a, sv_length, b){
+  out = a*(sv_length)^b
+    return(out)
+}
+```
+
+```{r}
+#nls with guesses 
+all_lizard_nls = nls(weight ~ weight_model(a, sv_length, b), 
+                     data = lizard, 
+                     start = list(a=guess_coefs[1], b = guess_coefs[2]), trace = TRUE)
+
+lizard_nls = nls(weight ~ a*sv_length^b, 
+                 data = lizard, 
+                 start = list(a=guess_coefs[1], b = guess_coefs[2]))
+```
+
+#### All Lizards
+Present your fitted model on a plot with female and male lizards separated by color. You should include the nls model in `kable` output of the html.
+
+#### Western Whiptail Lizards 
+Filter out the dataset for male Western Whiptail lizard (Cnemidophorus tigrisatus). Fit an nls model to this subset. Compare the output from the species specific nls model to the general nls model for all species by graphing the model fits on the Western Whiptail male data. Report the RMSE for both models in the figure caption. Also in the figure caption briefly discuss which model should be used and why.
+
